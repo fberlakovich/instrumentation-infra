@@ -232,9 +232,27 @@ class SPEC2017(Target):
                                       self.name, instance.name)
                 os.makedirs(outdir, exist_ok=True)
                 outfile = os.path.join(outdir, bench)
+
+                if ctx.args.clean_only_binaries:
+                    clean_jobid = 'clean-%s-%s' % (instance.name, bench)
+                    clean_cmd = 'killwrap_tree runcpu --config=%s --action=clobber %s' % \
+                                (config, bench)
+                    self._run_bash(ctx, clean_cmd, pool, jobid=clean_jobid,
+                                   outfile=outfile, nnodes=1)
+
+                jobid = 'build-%s-%s' % (instance.name, bench)
+
                 self._run_bash(ctx, cmd, pool, jobid=jobid,
                               outfile=outfile, nnodes=1)
             else:
+                if ctx.args.clean_only_binaries:
+                    ctx.log.info('cleaning %s-%s %s' %
+                                 (self.name, instance.name, bench))
+
+                    clean_cmd = 'killwrap_tree runcpu --config=%s --action=clobber %s' % \
+                                (config, bench)
+                    self._run_bash(ctx, clean_cmd, teeout=print_output)
+
                 ctx.log.info('building %s-%s %s' %
                              (self.name, instance.name, bench))
                 self._run_bash(ctx, cmd, teeout=print_output)
@@ -364,7 +382,10 @@ class SPEC2017(Target):
 
             for bench in benchmarks:
                 jobid = 'run-%s-%s' % (instance.name, bench)
+                bench_name = bench
                 outfile = outfile_path(ctx, self, instance, bench)
+                if hasattr(ctx, 'outfile_transformer'):
+                    outfile = ctx.outfile_transformer(outfile)
                 self._run_bash(ctx, cmd.format(bench=bench), pool, jobid=jobid,
                                outfile=outfile, nnodes=ctx.args.iterations)
         else:
