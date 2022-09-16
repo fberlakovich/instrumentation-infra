@@ -228,7 +228,7 @@ class ReportCommand(Command):
                     for ag in aggr:
                         series = grouped.get((key, f), [-1])
                         value = _aggregate_fns[ag](series)
-                        baseline_results[(groupby_value, f)] = value
+                        baseline_results[(groupby_value, f, ag)] = value
 
             row = [groupby_value]
             for instance in instances:
@@ -244,7 +244,7 @@ class ReportCommand(Command):
                         else:
                             value = _aggregate_fns[ag](series)
                             if baseline_results and isinstance(value, (int, float)):
-                                value /= baseline_results[(groupby_value, f)]
+                                value /= baseline_results[(groupby_value, f, ag)]
                         row.append(value)
             data.append(row)
 
