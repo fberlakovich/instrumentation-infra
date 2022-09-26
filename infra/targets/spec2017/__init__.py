@@ -1,3 +1,4 @@
+import distutils.dir_util
 import os
 import shutil
 import logging
@@ -94,20 +95,20 @@ class SPEC2017(Target):
 
     reportable_fields = {
         'benchmark': 'benchmark program',
-        'status':    'whether the benchmark finished successfully',
-        'runtime':   'total runtime in seconds',
-        'hostname':  'machine hostname',
-        'workload':  'run workload (test / ref / train)',
-        'inputs':    'number of different benchmark inputs',
+        'status': 'whether the benchmark finished successfully',
+        'runtime': 'total runtime in seconds',
+        'hostname': 'machine hostname',
+        'workload': 'run workload (test / ref / train)',
+        'inputs': 'number of different benchmark inputs',
         **RusageCounters.reportable_fields,
     }
     aggregation_field = 'benchmark'
 
     def __init__(self, source_type: str,
-                       source: str,
-                       patches: List[str] = [],
-                       nothp: bool = True,
-                       force_cpu: int = 0):
+                 source: str,
+                 patches: List[str] = [],
+                 nothp: bool = True,
+                 force_cpu: int = 0):
         if source_type not in ('isofile', 'mounted', 'installed', 'tarfile', 'git'):
             raise FatalError('invalid source type "%s"' % source_type)
 
@@ -125,21 +126,21 @@ class SPEC2017(Target):
 
     def add_build_args(self, parser):
         parser.add_argument('--benchmarks',
-                nargs='+', metavar='BENCHMARK', default=['pure_c', 'pure_cpp'],
-                choices=self.benchmarks,
-                help='which benchmarks to build')
+                            nargs='+', metavar='BENCHMARK', default=['pure_c', 'pure_cpp'],
+                            choices=self.benchmarks,
+                            help='which benchmarks to build')
 
     def add_run_args(self, parser):
         parser.add_argument('--benchmarks',
-                nargs='+', metavar='BENCHMARK', default=['pure_c', 'pure_cpp'],
-                choices=self.benchmarks,
-                help='which benchmarks to run')
+                            nargs='+', metavar='BENCHMARK', default=['pure_c', 'pure_cpp'],
+                            choices=self.benchmarks,
+                            help='which benchmarks to run')
         parser.add_argument('--test', action='store_true',
-                help='run a single iteration of the test workload')
+                            help='run a single iteration of the test workload')
         group = parser.add_mutually_exclusive_group()
         group.add_argument('--runspec-args',
-                nargs=argparse.REMAINDER, default=[],
-                help='additional arguments for runspec')
+                           nargs=argparse.REMAINDER, default=[],
+                           help='additional arguments for runspec')
 
     def dependencies(self):
         yield Bash('4.3')
@@ -226,8 +227,33 @@ class SPEC2017(Target):
         for bench in self._get_benchmarks(ctx, instance):
             cmd = 'killwrap_tree runcpu --config=%s --action=build %s' % \
                   (config, bench)
+
+            def backup_binaries(job):
+                exe_dir = self._install_path(ctx, 'benchspec/CPU', bench, 'exe')
+                target_dir = outfile_path(ctx, self, instance, bench + '-exe')
+                if 'backup_file_transformer' in ctx:
+                    target_dir = ctx.backup_file_transformer(target_dir)
+
+                distutils.dir_util.copy_tree(exe_dir, target_dir)
+                return True
+
+            def backup_run(job):
+                run_dir = self._install_path(ctx, 'benchspec/CPU', bench, 'run')
+                target_dir = outfile_path(ctx, self, instance, bench + '-run')
+                if 'backup_file_transformer' in ctx:
+                    target_dir = ctx.backup_file_transformer(target_dir)
+
+                distutils.dir_util.copy_tree(run_dir, target_dir)
+                return True
+
+            backup_callback = None
+            if ctx.args.backup == 'binaries':
+                backup_callback = backup_binaries
+
+            if ctx.args.backup == 'run':
+                backup_callback = backup_binaries
+
             if pool:
-                jobid = 'build-%s-%s' % (instance.name, bench)
                 outdir = os.path.join(ctx.paths.pool_results, 'build',
                                       self.name, instance.name)
                 os.makedirs(outdir, exist_ok=True)
@@ -243,7 +269,7 @@ class SPEC2017(Target):
                 jobid = 'build-%s-%s' % (instance.name, bench)
 
                 self._run_bash(ctx, cmd, pool, jobid=jobid,
-                              outfile=outfile, nnodes=1)
+                               outfile=outfile, nnodes=1, onsuccess=backup_callback)
             else:
                 if ctx.args.clean_only_binaries:
                     ctx.log.info('cleaning %s-%s %s' %
@@ -255,7 +281,7 @@ class SPEC2017(Target):
 
                 ctx.log.info('building %s-%s %s' %
                              (self.name, instance.name, bench))
-                self._run_bash(ctx, cmd, teeout=print_output)
+                self._run_bash(ctx, cmd, teeout=print_output, onsuccess=backup_callback)
 
     def run(self, ctx, instance, pool=None):
         config = 'infra-' + instance.name
@@ -294,7 +320,7 @@ class SPEC2017(Target):
         runargs += ctx.args.runspec_args
         runargs = qjoin(runargs)
 
-        wrapper =  'killwrap_tree'
+        wrapper = 'killwrap_tree'
         if self.nothp:
             wrapper += ' nothp'
         if self.force_cpu >= 0:
@@ -384,7 +410,7 @@ class SPEC2017(Target):
                 jobid = 'run-%s-%s' % (instance.name, bench)
                 bench_name = bench
                 outfile = outfile_path(ctx, self, instance, bench)
-                if hasattr(ctx, 'outfile_transformer'):
+                if 'outfile_transformer' in ctx:
                     outfile = ctx.outfile_transformer(outfile)
                 self._run_bash(ctx, cmd.format(bench=bench), pool, jobid=jobid,
                                outfile=outfile, nnodes=ctx.args.iterations)
