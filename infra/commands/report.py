@@ -98,6 +98,9 @@ class ReportCommand(Command):
             report_modes.add_argument('--overhead', metavar='INSTANCE',
                     choices=self.instances,
                     help='report each field as overhead relative to this baseline')
+            tparser.add_argument('--show-baseline',
+                    action='store_true',
+                    help='if reporting overheads, also report the raw baseline values')
 
             tparser.add_argument('--groupby', metavar='FIELD',
                     choices=_reportable_fields(target),
@@ -210,7 +213,7 @@ class ReportCommand(Command):
         header = [ctx.args.groupby]
         human_header = ['\n\n' + ctx.args.groupby]
         for instance in instances:
-            if instance == baseline_instance:
+            if not ctx.args.show_baseline and instance == baseline_instance:
                 continue
 
             for i, (f, aggr) in enumerate(fields):
@@ -234,7 +237,7 @@ class ReportCommand(Command):
 
             row = [groupby_value]
             for instance in instances:
-                if instance == baseline_instance:
+                if not ctx.args.show_baseline and instance == baseline_instance:
                     continue
                 per_instance.setdefault(instance, dict())
                 key = groupby_value, instance
@@ -245,7 +248,7 @@ class ReportCommand(Command):
                             value = None
                         else:
                             value = _aggregate_fns[ag](series)
-                            if baseline_results and isinstance(value, (int, float)):
+                            if instance != baseline_instance and baseline_results and isinstance(value, (int, float)):
                                 value /= baseline_results[(groupby_value, f, ag)]
                         row.append(value)
                         per_instance[instance].setdefault(groupby_value, dict())
