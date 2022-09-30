@@ -1,19 +1,20 @@
-import distutils.dir_util
-import os
-import shutil
-import logging
 import argparse
+import distutils.dir_util
 import getpass
+import logging
+import os
 import re
-from contextlib import redirect_stdout
+import shutil
 from collections import defaultdict
+from contextlib import redirect_stdout
 from typing import List
+
+from .benchmark_sets import benchmark_sets
 from ...commands.report import outfile_path
-from ...util import FatalError, run, apply_patch, qjoin, require_program
-from ...target import Target
 from ...packages import Bash, Nothp, RusageCounters
 from ...parallel import PrunPool
-from .benchmark_sets import benchmark_sets
+from ...target import Target
+from ...util import FatalError, run, apply_patch, qjoin, require_program, Namespace
 
 
 class SPEC2017(Target):
@@ -141,7 +142,10 @@ class SPEC2017(Target):
         group.add_argument('--runspec-args',
                            nargs=argparse.REMAINDER, default=[],
                            help='additional arguments for runspec')
-
+        parser.add_argument('--backup', action='store', choices=['nothing', 'binaries', 'run'], default='nothing',
+                             help='Backup either nothing, binaries or run directories after a run')
+        parser.add_argument('--clean-mode', action='store', choices=['full', 'binaries'], default='full',
+                             help='rebuild only binaries')
     def dependencies(self):
         yield Bash('4.3')
         if self.nothp:
@@ -211,6 +215,20 @@ class SPEC2017(Target):
                 ctx.log.warning('applied patch %s to external SPEC-CPU2017 '
                                 'directory' % path)
 
+    def clean(self, ctx: Namespace):
+        if ctx.args.clean_mode == 'binaries':
+            # create an empty configuration file to make runcpu happy
+            config_path = self._install_path(ctx, 'config/default.cfg')
+            with open(config_path, 'w'):
+                pass
+
+            benchmarks = self._get_benchmarks(ctx, None)
+            clean_cmd = 'killwrap_tree runcpu --action=clobber %s' % qjoin(benchmarks)
+            print_output = ctx.loglevel == logging.DEBUG
+            self._run_bash(ctx, clean_cmd, teeout=print_output)
+        else:
+            super().clean()
+
     def build(self, ctx, instance, pool=None):
         # apply any pending patches (doing this at build time allows adding
         # patches during instance development, and is needed to apply patches
@@ -225,63 +243,25 @@ class SPEC2017(Target):
         print_output = ctx.loglevel == logging.DEBUG
 
         for bench in self._get_benchmarks(ctx, instance):
-            cmd = 'killwrap_tree runcpu --config=%s --action=build %s' % \
-                  (config, bench)
-
-            def backup_binaries(job):
-                exe_dir = self._install_path(ctx, 'benchspec/CPU', bench, 'exe')
-                target_dir = outfile_path(ctx, self, instance, bench + '-exe')
-                if 'backup_file_transformer' in ctx:
-                    target_dir = ctx.backup_file_transformer(target_dir)
-
-                distutils.dir_util.copy_tree(exe_dir, target_dir)
-                return True
-
-            def backup_run(job):
-                run_dir = self._install_path(ctx, 'benchspec/CPU', bench, 'run')
-                target_dir = outfile_path(ctx, self, instance, bench + '-run')
-                if 'backup_file_transformer' in ctx:
-                    target_dir = ctx.backup_file_transformer(target_dir)
-
-                distutils.dir_util.copy_tree(run_dir, target_dir)
-                return True
-
-            backup_callback = None
-            if ctx.args.backup == 'binaries':
-                backup_callback = backup_binaries
-
-            if ctx.args.backup == 'run':
-                backup_callback = backup_binaries
+            uniqueid=''
+            if ctx.rngseed:
+                uniqueid=ctx.rngseed
+            cmd = 'killwrap_tree runcpu --config=%s --action=build --expid=%s %s' % \
+                  (config, uniqueid, bench)
 
             if pool:
                 outdir = os.path.join(ctx.paths.pool_results, 'build',
                                       self.name, instance.name)
                 os.makedirs(outdir, exist_ok=True)
                 outfile = os.path.join(outdir, bench)
-
-                if ctx.args.clean_only_binaries:
-                    clean_jobid = 'clean-%s-%s' % (instance.name, bench)
-                    clean_cmd = 'killwrap_tree runcpu --config=%s --action=clobber %s' % \
-                                (config, bench)
-                    self._run_bash(ctx, clean_cmd, pool, jobid=clean_jobid,
-                                   outfile=outfile, nnodes=1)
-
                 jobid = 'build-%s-%s' % (instance.name, bench)
 
                 self._run_bash(ctx, cmd, pool, jobid=jobid,
-                               outfile=outfile, nnodes=1, onsuccess=backup_callback)
+                               outfile=outfile, nnodes=1)
             else:
-                if ctx.args.clean_only_binaries:
-                    ctx.log.info('cleaning %s-%s %s' %
-                                 (self.name, instance.name, bench))
-
-                    clean_cmd = 'killwrap_tree runcpu --config=%s --action=clobber %s' % \
-                                (config, bench)
-                    self._run_bash(ctx, clean_cmd, teeout=print_output)
-
                 ctx.log.info('building %s-%s %s' %
                              (self.name, instance.name, bench))
-                self._run_bash(ctx, cmd, teeout=print_output, onsuccess=backup_callback)
+                self._run_bash(ctx, cmd, teeout=print_output)
 
     def run(self, ctx, instance, pool=None):
         config = 'infra-' + instance.name
@@ -326,10 +306,31 @@ class SPEC2017(Target):
         if self.force_cpu >= 0:
             wrapper += ' taskset -c %d' % self.force_cpu
 
-        cmd = '{wrapper} runcpu --config={config} --nobuild {runargs} {{bench}}'
+        uniqueid = ctx.uniqueid or ''
+
+        cmd = '{wrapper} runcpu --config={config} --nobuild {runargs} --expid={uniqueid} {{bench}}'
         cmd = cmd.format(**locals())
 
         benchmarks = self._get_benchmarks(ctx, instance)
+
+        def backup_binaries(job):
+            exe_dir = self._install_path(ctx, 'benchspec/CPU', bench, 'exe', uniqueid)
+            target_dir = outfile_path(ctx, self, instance, bench + '-exe', uniqueid)
+            distutils.dir_util.copy_tree(exe_dir, target_dir)
+            return True
+
+        def backup_run(job):
+            run_dir = self._install_path(ctx, 'benchspec/CPU', bench, 'run', uniqueid)
+            target_dir = outfile_path(ctx, self, instance, bench + '-run', uniqueid)
+            distutils.dir_util.copy_tree(run_dir, target_dir)
+            return True
+
+        backup_callback = None
+        if ctx.args.backup == 'binaries':
+            backup_callback = backup_binaries
+
+        if ctx.args.backup == 'run':
+            backup_callback = backup_run
 
         if pool:
             if isinstance(pool, PrunPool):
@@ -410,10 +411,11 @@ class SPEC2017(Target):
                 jobid = 'run-%s-%s' % (instance.name, bench)
                 bench_name = bench
                 outfile = outfile_path(ctx, self, instance, bench)
-                if 'outfile_transformer' in ctx:
-                    outfile = ctx.outfile_transformer(outfile)
+                if uniqueid != '':
+                    outfile += '-%s' % uniqueid
                 self._run_bash(ctx, cmd.format(bench=bench), pool, jobid=jobid,
-                               outfile=outfile, nnodes=ctx.args.iterations)
+                               outfile=outfile, nnodes=ctx.args.iterations, onsuccess=backup_callback,
+                               onerror=backup_callback)
         else:
             self._run_bash(ctx, cmd.format(bench=qjoin(benchmarks)),
                            teeout=True)
@@ -507,9 +509,10 @@ class SPEC2017(Target):
         benchmarks = set()
         for bset in ctx.args.benchmarks:
             for bench in self.benchmarks[bset]:
-                if not hasattr(instance, 'exclude_spec2017_benchmark') or \
-                        not instance.exclude_spec2017_benchmark(bench):
-                    benchmarks.add(bench)
+                if instance and (hasattr(instance, 'exclude_spec2017_benchmark') and
+                                 not instance.exclude_spec2017_benchmark(bench)):
+                    continue
+                benchmarks.add(bench)
         return sorted(benchmarks)
 
     # define benchmark sets, generated using scripts/parse-benchmarks-sets.py
