@@ -144,8 +144,6 @@ class SPEC2017(Target):
                            help='additional arguments for runspec')
         parser.add_argument('--backup', action='store', choices=['nothing', 'binaries', 'run'], default='nothing',
                              help='Backup either nothing, binaries or run directories after a run')
-        parser.add_argument('--clean-mode', action='store', choices=['full', 'binaries'], default='full',
-                             help='rebuild only binaries')
     def dependencies(self):
         yield Bash('4.3')
         if self.nothp:
@@ -216,18 +214,7 @@ class SPEC2017(Target):
                                 'directory' % path)
 
     def clean(self, ctx: Namespace):
-        if ctx.args.clean_mode == 'binaries':
-            # create an empty configuration file to make runcpu happy
-            config_path = self._install_path(ctx, 'config/default.cfg')
-            with open(config_path, 'w'):
-                pass
-
-            benchmarks = self._get_benchmarks(ctx, None)
-            clean_cmd = 'killwrap_tree runcpu --action=clobber %s' % qjoin(benchmarks)
-            print_output = ctx.loglevel == logging.DEBUG
-            self._run_bash(ctx, clean_cmd, teeout=print_output)
-        else:
-            super().clean()
+        super().clean()
 
     def build(self, ctx, instance, pool=None):
         # apply any pending patches (doing this at build time allows adding
@@ -316,25 +303,6 @@ class SPEC2017(Target):
 
         benchmarks = self._get_benchmarks(ctx, instance)
 
-        def backup_binaries(job):
-            exe_dir = self._install_path(ctx, 'benchspec/CPU', bench, 'exe', uniqueid)
-            target_dir = outfile_path(ctx, self, instance, bench + '-exe', uniqueid)
-            distutils.dir_util.copy_tree(exe_dir, target_dir)
-            return True
-
-        def backup_run(job):
-            run_dir = self._install_path(ctx, 'benchspec/CPU', bench, 'run', uniqueid)
-            target_dir = outfile_path(ctx, self, instance, bench + '-run', uniqueid)
-            distutils.dir_util.copy_tree(run_dir, target_dir)
-            return True
-
-        backup_callback = None
-        if ctx.args.backup == 'binaries':
-            backup_callback = backup_binaries
-
-        if ctx.args.backup == 'run':
-            backup_callback = backup_run
-
         if pool:
             if isinstance(pool, PrunPool):
                 # prepare output dir on local disk before running,
@@ -416,6 +384,26 @@ class SPEC2017(Target):
                 outfile = outfile_path(ctx, self, instance, bench)
                 if uniqueid != '':
                     outfile += '-%s' % uniqueid
+
+                def backup_binaries(job, current_bench=bench):
+                    exe_dir = self._install_path(ctx, 'benchspec/CPU', current_bench, 'exe', uniqueid)
+                    target_dir = outfile_path(ctx, self, instance, current_bench + '-exe', uniqueid)
+                    distutils.dir_util.copy_tree(exe_dir, target_dir)
+                    return True
+
+                def backup_run(job, current_bench=bench):
+                    run_dir = self._install_path(ctx, 'benchspec/CPU', current_bench, 'run', uniqueid)
+                    target_dir = outfile_path(ctx, self, instance, current_bench + '-run', uniqueid)
+                    distutils.dir_util.copy_tree(run_dir, target_dir)
+                    return True
+
+                backup_callback = None
+                if ctx.args.backup == 'binaries':
+                    backup_callback = backup_binaries
+
+                if ctx.args.backup == 'run':
+                    backup_callback = backup_run
+
                 self._run_bash(ctx, cmd.format(bench=bench), pool, jobid=jobid,
                                outfile=outfile, nnodes=ctx.args.iterations, onsuccess=backup_callback,
                                onerror=backup_callback)
