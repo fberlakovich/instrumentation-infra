@@ -320,7 +320,12 @@ class WebServerRunner:
             self.logdir = os.path.join(tmpdir, 'log')
 
     def logfile(self, outfile):
-        return os.path.join(self.logdir, outfile)
+        path = os.path.join(self.logdir, outfile)
+        if 'uniqueid' in self.ctx:
+            uniqueid = self.ctx.uniqueid
+            path += "." + uniqueid
+
+        return path
 
     def run_serve(self):
         if self.pool:
