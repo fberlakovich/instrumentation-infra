@@ -230,12 +230,12 @@ class SPEC2017(Target):
         print_output = ctx.loglevel == logging.DEBUG
 
         for bench in self._get_benchmarks(ctx, instance):
-            uniqueid = ''
+            expid = ''
             if 'uniqueid' in ctx:
-                uniqueid = ctx.uniqueid
+                expid = '--expid=%s' % ctx.uniqueid
 
-            cmd = 'killwrap_tree runcpu --config=%s --action=build --expid=%s %s' % \
-                  (config, uniqueid, bench)
+            cmd = 'killwrap_tree runcpu --config=%s --action=build %s %s' % \
+                  (config, expid, bench)
 
             if pool:
                 outdir = os.path.join(ctx.paths.pool_results, 'build',
@@ -294,11 +294,11 @@ class SPEC2017(Target):
         if self.force_cpu >= 0:
             wrapper += ' taskset -c %d' % self.force_cpu
 
-        uniqueid = ''
+        expid = ''
         if 'uniqueid' in ctx:
-            uniqueid = ctx.uniqueid
+            expid = '--expid=%s' % ctx.uniqueid
 
-        cmd = '{wrapper} runcpu --config={config} --nobuild {runargs} --expid={uniqueid} {{bench}}'
+        cmd = '{wrapper} runcpu --config={config} --nobuild {runargs} {expid} {{bench}}'
         cmd = cmd.format(**locals())
 
         benchmarks = self._get_benchmarks(ctx, instance)
