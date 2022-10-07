@@ -63,6 +63,9 @@ class WebServer(Target, metaclass=ABCMeta):
         parser.add_argument('--duration',
                 metavar='SECONDS', default=10, type=int,
                 help='benchmark duration in seconds (default 10)')
+        parser.add_argument('--timeout',
+                metavar='SECONDS', default=2, type=int,
+                help='wrk connection timeout in seconds (default 2)')
         parser.add_argument('--threads',
                 type=int, default=1,
                 help='concurrent wrk threads (distributes client load)')
@@ -432,9 +435,11 @@ class WebServerRunner:
                                 '--duration {wrk_duration}s '
                                 '--connections {cons} '
                                 '--threads {wrk_threads} '
+                                '--timeout {wrk_timeout} '
                                 '"{url}"'.format(wrk_path=wrk_path,
                                                 wrk_duration=wrk_duration,
                                                 wrk_threads=wrk_threads,
+                                                wrk_timeout=wrk_timeout,
                                                 cons=cons,
                                                 url=url),
                     allow_error=True)
@@ -498,6 +503,7 @@ class WebServerRunner:
         url = 'http://{a.server_ip}:{a.port}/index.html'.format(a=self.ctx.args)
         wrk_path = Wrk().get_binary_path(self.ctx)
         wrk_threads = self.ctx.args.threads
+        wrk_timeout = self.ctx.args.timeout
         wrk_duration = self.ctx.args.duration
 
         collect_stats = []
