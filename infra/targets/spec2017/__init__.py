@@ -295,7 +295,7 @@ class SPEC2017(Target):
             wrapper += ' taskset -c %d' % self.force_cpu
 
         expid = ''
-        uniqueid = None
+        uniqueid = ''
         if 'uniqueid' in ctx:
             uniqueid = ctx.uniqueid
             expid = '--expid=%s' % ctx.uniqueid
@@ -384,7 +384,7 @@ class SPEC2017(Target):
                 jobid = 'run-%s-%s' % (instance.name, bench)
                 bench_name = bench
                 outfile = outfile_path(ctx, self, instance, bench)
-                if uniqueid is not None:
+                if uniqueid != '':
                     outfile += '-%s' % uniqueid
 
                 def backup_binaries(job, current_bench=bench):
