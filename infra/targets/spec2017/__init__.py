@@ -471,6 +471,9 @@ class SPEC2017(Target):
                 print('    FC_VERSION_OPTION  = --version')
                 print('')
 
+                for env, value in ctx.benchenv.items():
+                    print('    preENV_%s = %s' % (env, value))
+
                 print('#--------- Portability -----------------')
                 print('default:')
                 print('     EXTRA_PORTABILITY = -DSPEC_LP64')

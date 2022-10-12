@@ -224,6 +224,7 @@ class Setup:
         paths.pool_results = os.path.join(paths.root, 'results')
 
         self.ctx.runenv = Namespace()
+        self.ctx.benchenv = Namespace()
         self.ctx.cc = 'cc'
         self.ctx.cxx = 'c++'
         self.ctx.ar = 'ar'
