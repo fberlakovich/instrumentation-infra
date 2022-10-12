@@ -143,7 +143,7 @@ class SPEC2017(Target):
                            nargs=argparse.REMAINDER, default=[],
                            help='additional arguments for runspec')
         parser.add_argument('--backup', action='store', choices=['nothing', 'binaries', 'run'], default='nothing',
-                             help='Backup either nothing, binaries or run directories after a run')
+                            help='Backup either nothing, binaries or run directories after a run')
     def dependencies(self):
         yield Bash('4.3')
         if self.nothp:
@@ -387,15 +387,18 @@ class SPEC2017(Target):
                 if uniqueid != '':
                     outfile += '-%s' % uniqueid
 
-                def backup_binaries(job, current_bench=bench):
-                    exe_dir = self._install_path(ctx, 'benchspec/CPU', current_bench, 'exe', uniqueid)
-                    target_dir = outfile_path(ctx, self, instance, current_bench + '-exe', uniqueid)
+                # use default parameters to create a copy of bench and uniqueid at the time of function declaration
+                def backup_binaries(job, current_bench=bench, current_uniqueid=uniqueid):
+                    exe_dir = self._install_path(ctx, 'benchspec/CPU', current_bench, 'exe', current_uniqueid)
+                    target_dir = outfile_path(ctx, self, instance, current_bench + '-exe', current_uniqueid)
+                    ctx.log.debug("Backing up %s to %s" % (exe_dir, target_dir))
                     distutils.dir_util.copy_tree(exe_dir, target_dir)
                     return True
 
-                def backup_run(job, current_bench=bench):
-                    run_dir = self._install_path(ctx, 'benchspec/CPU', current_bench, 'run', uniqueid)
-                    target_dir = outfile_path(ctx, self, instance, current_bench + '-run', uniqueid)
+                def backup_run(job, current_bench=bench, current_uniqueid=uniqueid):
+                    run_dir = self._install_path(ctx, 'benchspec/CPU', current_bench, 'run', current_uniqueid)
+                    target_dir = outfile_path(ctx, self, instance, current_bench + '-run', current_uniqueid)
+                    ctx.log.debug("Backing up %s to %s" % (run_dir, target_dir))
                     distutils.dir_util.copy_tree(run_dir, target_dir)
                     return True
 
