@@ -13,7 +13,7 @@ from multiprocessing import cpu_count
 from typing import List, Dict, Union, Any
 from ..commands.report import outfile_path
 from ..instance import Instance
-from ..packages import Bash, Wrk, Netcat, Scons
+from ..packages import Bash, Wrk, Netcat, Scons, RusageCounters
 from ..parallel import Pool, ProcessPool, SSHPool, PrunPool
 from ..target import Target
 from ..util import run, download, qjoin, param_attrs, FatalError, untar, Namespace
@@ -34,6 +34,8 @@ class WebServer(Target, metaclass=ABCMeta):
         'transferrate': 'network traffic (KB/s)',
         'duration':     'benchmark duration (s)',
         'cpu':          'median server CPU load during benchmark (%%)',
+        'cpu-proc': 'median server CPU load during benchmark (%%)',
+        'rss':          'median rss size (KB)',
     }
     aggregation_field = 'connections'
 
@@ -41,6 +43,7 @@ class WebServer(Target, metaclass=ABCMeta):
         yield Bash('4.3')
         yield Wrk()
         yield Netcat('0.7.1')
+        yield RusageCounters()
 
     def add_run_args(self, parser):
         parser.add_argument('-t', '-type',
@@ -274,12 +277,18 @@ class WebServer(Target, metaclass=ABCMeta):
             }
             return size * factors[unit]
 
-        cpu_outfile = os.path.join(dirname, filename.replace('bench', 'cpu'))
-        with open(cpu_outfile) as f:
-            try:
-                cpu_usages = [float(line) for line in f]
-            except ValueError:
-                raise FatalError('%s contains invalid lines' % cpu_outfile)
+        def collect_from_file(name):
+            outfile = os.path.join(dirname, filename.replace('bench', name))
+            with open(outfile) as f:
+                try:
+                    values = [float(line) for line in f]
+                except ValueError:
+                    raise FatalError('%s contains invalid lines' % outfile)
+            return values
+
+        cpu_usages = collect_from_file("cpu")
+        rss_usages = collect_from_file("rss")
+        cpu_proc_usages = collect_from_file("cpu-proc")
 
         yield {
             'threads': int(search(r'(\d+) threads and \d+ connections')),
@@ -292,7 +301,10 @@ class WebServer(Target, metaclass=ABCMeta):
             'throughput': float(search(r'^Requests/sec:\s+([0-9.]+)')),
             'transferrate': parse_bytesize(search(r'^Transfer/sec:\s+(.+)')),
             'duration': float(search(r'\d+ requests in ([\d.]+)s,')),
-            'cpu': median(sorted(cpu_usages))
+            'cpu': median(sorted(cpu_usages)),
+            'cpu-proc': median(sorted(cpu_proc_usages)),
+            # 'rss': median(sorted(rss_usages)) / 1000
+            'rss': 0
         }
 
 
@@ -463,7 +475,9 @@ class WebServerRunner:
 
         def _kill_server():
             """Really really kills the running server."""
-            server.kill()
+            result = server.kill()
+            with open(self.logfile('server.stderr'), 'w') as f:
+                f.write(result['stderr'])
             server.wait(timeout=1, allow_error=True)
             forcekillcmd = self.server.kill_cmd(self)
             server.run(forcekillcmd, allow_error=True)
@@ -768,7 +782,8 @@ class WebServerRunner:
             host_command = 'ifconfig ib0 2>/dev/null | grep -Po "(?<=inet )[^ ]+"'
         return '''
         echo "=== creating local run directory"
-        rm -rf "{self.rundir}"
+        [ -d {self.rundir} ] && rm -rf "{self.rundir}"
+        mkdir -p $(dirname {self.rundir})
         cp -r {self.stagedir} {self.rundir}
 
         echo "=== starting web server"
@@ -789,7 +804,7 @@ class WebServerRunner:
         fi
 
         echo "=== removing local run directory"
-        rm -rf "{self.rundir}"
+        [ -d {self.rundir} ] && rm -rf "{self.rundir}"
         '''.format(**vars(self.ctx.args), **locals())
 
     def server_script(self, body_template, **fmt_args):
@@ -951,6 +966,8 @@ class Nginx(WebServer):
             shutil.rmtree('nginx-' + self.version, ignore_errors=True)
             untar(ctx, self.tar_name(), instance.name, remove=False)
 
+        RusageCounters().configure(ctx)
+
         # Configure if there is no Makefile or if flags changed
         os.chdir(instance.name)
         if self.should_configure(ctx):
@@ -1048,7 +1065,7 @@ class Nginx(WebServer):
 
     def start_cmd(self, runner, foreground=False):
         nginx = self.server_bin(runner.ctx, runner.instance)
-        runopt = '-g "daemon off;"' if foreground else ''
+        runopt = '-g "daemon off;error_log /dev/stderr;"' if foreground else ''
         if runner.ctx.args.nofork:
             runopt = '-g "daemon off; master_process off;"'
         return '{nginx} -p "{runner.rundir}" -c nginx.conf {runopt}'\

@@ -391,9 +391,8 @@ class RemoteRunner:
 
         if self.proc.poll() is None:
             self.proc.terminate()
-
         try:
-            self.proc.wait(timeout=1)
+            return self.wait(timeout=1, output=True)
         except subprocess.TimeoutExpired:
             self.proc.kill()
             self.proc.wait()
