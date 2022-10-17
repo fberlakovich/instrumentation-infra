@@ -34,6 +34,7 @@ class WebServer(Target, metaclass=ABCMeta):
         'transferrate': 'network traffic (KB/s)',
         'duration':     'benchmark duration (s)',
         'cpu':          'median server CPU load during benchmark (%%)',
+        'cpu-proc':     'median CPU of server processes'
     }
     aggregation_field = 'connections'
 
@@ -274,12 +275,17 @@ class WebServer(Target, metaclass=ABCMeta):
             }
             return size * factors[unit]
 
-        cpu_outfile = os.path.join(dirname, filename.replace('bench', 'cpu'))
-        with open(cpu_outfile) as f:
-            try:
-                cpu_usages = [float(line) for line in f]
-            except ValueError:
-                raise FatalError('%s contains invalid lines' % cpu_outfile)
+        def collect_from_file(name):
+            outfile = os.path.join(dirname, filename.replace('bench', name))
+            with open(outfile) as f:
+                try:
+                    values = [float(line) for line in f]
+                except ValueError:
+                    raise FatalError('%s contains invalid lines' % outfile)
+            return values
+
+        cpu_usages = collect_from_file("cpu")
+        cpu_proc_usages = collect_from_file("cpu-proc")
 
         yield {
             'threads': int(search(r'(\d+) threads and \d+ connections')),
@@ -292,7 +298,8 @@ class WebServer(Target, metaclass=ABCMeta):
             'throughput': float(search(r'^Requests/sec:\s+([0-9.]+)')),
             'transferrate': parse_bytesize(search(r'^Transfer/sec:\s+(.+)')),
             'duration': float(search(r'\d+ requests in ([\d.]+)s,')),
-            'cpu': median(sorted(cpu_usages))
+            'cpu': median(sorted(cpu_usages)),
+            'cpu-proc': median(sorted(cpu_proc_usages))
         }
 
 
