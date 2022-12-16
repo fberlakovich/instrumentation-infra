@@ -9,8 +9,10 @@ from collections import defaultdict
 from contextlib import redirect_stdout
 from typing import List
 
+import numpy
+
 from .benchmark_sets import benchmark_sets
-from ...commands.report import outfile_path
+from ...commands.report import outfile_path, parse_results
 from ...packages import Bash, Nothp, RusageCounters
 from ...parallel import PrunPool
 from ...target import Target
@@ -470,6 +472,8 @@ class SPEC2017(Target):
                 print('    CXX_VERSION_OPTION = --version')
                 print('    FC_VERSION_OPTION  = --version')
                 print('')
+                print('    monitor_wrapper = /backup/repositories/instrumentation-skeleton/venv/bin/python /backup/repositories/instrumentation-skeleton/monitor.py $command')
+                print('')
 
                 for env, value in ctx.benchenv.items():
                     print('    preENV_%s = %s' % (env, value))
@@ -556,8 +560,10 @@ class SPEC2017(Target):
                 # find per-input logs by benchutils staticlib
                 rpat = r'Running %s.+?-C (.+?$)(.+?)^Specinvoke:' % benchmark
                 rundir, arglist = re.search(rpat, logcontents, re.M | re.S).groups()
-                errfiles = re.findall(r'-e ([^ ]+err) \.\./run_', arglist)
+                errfiles = re.findall(r'-e ([^ ]+err) /backup', arglist)
                 benchmark_error = False
+                call_values = []
+                mem_values = []
                 for errfile in errfiles:
                     path = os.path.join(fix_specpath(rundir), errfile)
                     if not os.path.exists(path):
@@ -568,6 +574,23 @@ class SPEC2017(Target):
 
                     rusage_results = \
                         list(RusageCounters.parse_results(ctx, path))
+
+                    call_counts = list(parse_results(ctx, path, "callcounts"))
+                    mem_info = list(parse_results(ctx, path, "meminfo"))
+                    # print(path)
+                    # print(mem_info)
+
+                    # for result in call_counts:
+                    #     for counter, value in result.items():
+                    #         call_sum += value
+                    # print(call_counts)
+                    for entry in call_counts:
+                        call_values.append(entry['calls'])
+
+                    for entry in mem_info:
+                        mem_values.append(entry['avg_mem'])
+
+
                     if not rusage_results:
                         ctx.log.error('no staticlib results in %s, there was '
                                       'probably an error' % path)
@@ -582,6 +605,11 @@ class SPEC2017(Target):
                     ctx.log.warning('cancel processing benchmark %s in log file '
                                     '%s because of errors' % (benchmark, logpath))
                 else:
+                    # if len(call_values) > 0:
+                    #     print("%s call sum: %s" % (benchmark, numpy.median(call_values) / 1000000))
+                    if len(mem_values) > 0:
+                        print("%s avg mem: %s" % (benchmark, numpy.median(mem_values) / 1024))
+
                     yield {
                         'benchmark': benchmark,
                         'status': 'ok' if status == 'Success' else 'invalid',
