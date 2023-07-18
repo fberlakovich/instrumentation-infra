@@ -50,6 +50,9 @@ class Wrk(Package):
     def get_binary_path(self, ctx: Context) -> str:
         return self.path(ctx, "src", "wrk")
 
+    def get_binary_path(self, ctx):
+        return self.path(ctx, 'src', 'wrk')
+
 
 class Wrk2(Wrk):
     """
