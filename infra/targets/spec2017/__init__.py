@@ -29,7 +29,7 @@ from ...parallel import Job, Pool, ProcessPool, PrunPool
 from ...target import Target
 from ...util import FatalError, ResultDict, apply_patch, qjoin, require_program, run
 from .benchmark_sets import benchmark_sets
-
+import distutils.dir_util
 
 class SPEC2017(Target):
     """
@@ -187,6 +187,17 @@ class SPEC2017(Target):
             help="additional arguments for runspec",
         )
 
+        parser.add_argument(
+            "--backup",
+            action="store",
+            choices=["nothing", "binaries", "run"],
+            default="nothing",
+            help="Backup either nothing, binaries or run directories after a run",
+        )
+
+    def clean(self, ctx: Context) -> None:
+        super().clean(ctx)
+
     def dependencies(self) -> Iterator[Package]:
         yield Bash("4.3")
         if self.nothp:
@@ -278,7 +289,12 @@ class SPEC2017(Target):
         print_output = ctx.loglevel == logging.DEBUG
 
         for bench in self._get_benchmarks(ctx, instance):
-            cmd = f"killwrap_tree runcpu --config={config} --action=build {bench}"
+            expid = ""
+            if "uniqueid" in ctx:
+                expid = "--expid=%s" % ctx.uniqueid
+            cmd = (
+                f"killwrap_tree runcpu --config={config} --action=build {expid} {bench}"
+            )
             if pool:
                 jobid = f"build-{instance.name}-{bench}"
                 outdir = os.path.join(
@@ -328,6 +344,12 @@ class SPEC2017(Target):
         runargs += ctx.args.runspec_args
 
         wrapper = "killwrap_tree"
+        expid = ""
+        uniqueid = ""
+        if "uniqueid" in ctx:
+            uniqueid = ctx.uniqueid
+            expid = "--expid=%s" % ctx.uniqueid
+
         if self.nothp:
             wrapper += " nothp"
         if self.force_cpu >= 0:
@@ -340,7 +362,7 @@ class SPEC2017(Target):
             else:
                 wrapper += f" taskset -c {self.force_cpu}"
 
-        cmd = f"{wrapper} runcpu --config={config} --nobuild {qjoin(runargs)} {{bench}}"
+        cmd = f"{wrapper} runcpu --config={config} --nobuild {qjoin(runargs)} {expid} {{bench}}"
 
         benchmarks = self._get_benchmarks(ctx, instance)
 
@@ -348,7 +370,8 @@ class SPEC2017(Target):
             if isinstance(pool, PrunPool):
                 # prepare output dir on local disk before running,
                 # and move output files to network disk after completion
-                cmd = _unindent(f"""
+                cmd = _unindent(
+                    f"""
                 set -ex
 
                 benchdir="benchspec/CPU2017/{{bench}}"
@@ -414,7 +437,8 @@ class SPEC2017(Target):
 
                 # clean up
                 rm -rf "{output_root}"
-                """)
+                """
+                )
 
                 # the script is passed like this: prun ... bash -c '<script>'
                 # this means that some escaping is necessary: use \$ instead of
@@ -423,11 +447,51 @@ class SPEC2017(Target):
 
             for bench in benchmarks:
                 jobid = f"run-{instance.name}-{bench}"
+                bench_name = bench
                 outfile = outfile_path(ctx, self, instance, bench)
+                if uniqueid != "":
+                    outfile += "-%s" % uniqueid
+
+                # use default parameters to create a copy of bench and uniqueid at the time of function declaration
+                def backup_binaries(
+                    job, current_bench=bench, current_uniqueid=uniqueid
+                ):
+                    exe_dir = self._install_path(
+                        ctx, "benchspec/CPU", current_bench, "exe", current_uniqueid
+                    )
+                    target_dir = outfile_path(
+                        ctx, self, instance, current_bench + "-exe", current_uniqueid
+                    )
+                    ctx.log.debug("Backing up %s to %s" % (exe_dir, target_dir))
+                    distutils.dir_util.copy_tree(exe_dir, target_dir)
+                    return True
+
+                def backup_run(job, current_bench=bench, current_uniqueid=uniqueid):
+                    run_dir = self._install_path(
+                        ctx, "benchspec/CPU", current_bench, "run", current_uniqueid
+                    )
+                    target_dir = outfile_path(
+                        ctx, self, instance, current_bench + "-run", current_uniqueid
+                    )
+                    ctx.log.debug("Backing up %s to %s" % (run_dir, target_dir))
+                    distutils.dir_util.copy_tree(run_dir, target_dir)
+                    return True
+
+                backup_callback = None
+                if ctx.args.backup == "binaries":
+                    backup_callback = backup_binaries
+
+                if ctx.args.backup == "run":
+                    backup_callback = backup_run
 
                 def onsuccess_parse_log(job: Job) -> None:
                     for job_outfile in job.outfiles:
                         process_log(ctx, job_outfile, self, write_cache=True)
+
+                def callback_wrapper(job: Job) -> None:
+                    if backup_callback is not None:
+                        backup_callback(job)
+                        onsuccess_parse_log(job)
 
                 self._run_bash(
                     ctx,
@@ -436,7 +500,8 @@ class SPEC2017(Target):
                     jobid=jobid,
                     outfile=outfile,
                     nnodes=ctx.args.iterations,
-                    onsuccess=onsuccess_parse_log,
+                    onerror=backup_callback,
+                    onsuccess=callback_wrapper,
                 )
         else:
             self._run_bash(ctx, cmd.format(bench=qjoin(benchmarks)), teeout=True)
@@ -453,12 +518,15 @@ class SPEC2017(Target):
         cmd = [
             "bash",
             "-c",
-            "\n" + _unindent(f"""
+            "\n"
+            + _unindent(
+                f"""
             cd {self._install_path(ctx)}
             source shrc
             source "{config_root}/scripts/kill-tree-on-interrupt.inc"
             {command}
-            """),
+            """
+            ),
         ]
         if pool:
             pool.run(ctx, cmd, onsuccess=onsuccess, **kwargs)
@@ -502,6 +570,9 @@ class SPEC2017(Target):
                 print(f"    CXX_VERSION_OPTION = --version")
                 print(f"    FC_VERSION_OPTION  = --version")
                 print(f"")
+
+                for env, value in ctx.benchenv.items():
+                    print('    preENV_%s = %s' % (env, value))
 
                 print(f"#--------- Portability -----------------")
                 print(f"default:")

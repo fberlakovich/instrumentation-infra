@@ -40,6 +40,7 @@ class WebServer(Target, metaclass=ABCMeta):
             "transferrate": "network traffic (KB/s)",
             "duration": "benchmark duration (s)",
             "cpu": "median server CPU load during benchmark (%%)",
+            "cpu-proc": "median CPU of server processes",
         }
 
     def dependencies(self) -> Iterator[Package]:
@@ -87,6 +88,15 @@ class WebServer(Target, metaclass=ABCMeta):
             type=int,
             help="benchmark duration in seconds (default 10)",
         )
+
+        parser.add_argument(
+            "--timeout",
+            metavar="SECONDS",
+            default=2,
+            type=int,
+            help="wrk connection timeout in seconds (default 2)",
+        )
+
         parser.add_argument(
             "--threads",
             type=int,
@@ -357,12 +367,18 @@ class WebServer(Target, metaclass=ABCMeta):
             }
             return size * factors[unit]
 
-        cpu_outfile = os.path.join(dirname, filename.replace("bench", "cpu"))
-        with open(cpu_outfile) as f:
-            try:
-                cpu_usages = [float(line) for line in f]
-            except ValueError:
-                raise FatalError(f"{cpu_outfile} contains invalid lines")
+        def collect_from_file(name):
+            outfile = os.path.join(dirname, filename.replace("bench", name))
+            with open(outfile) as f:
+                try:
+                    values = [float(line) for line in f]
+                except ValueError:
+                    raise FatalError(f"{outfile} contains invalid lines")
+
+            return values
+
+        cpu_usages = collect_from_file("cpu")
+        cpu_proc_usages = collect_from_file("cpu-proc")
 
         yield {
             "threads": int(search(r"(\d+) threads and \d+ connections")),
@@ -376,6 +392,7 @@ class WebServer(Target, metaclass=ABCMeta):
             "transferrate": parse_bytesize(search(r"^Transfer/sec:\s+(.+)")),
             "duration": float(search(r"\d+ requests in ([\d.]+)s,")),
             "cpu": median(sorted(cpu_usages)),
+            "cpu-proc": median(sorted(cpu_proc_usages)),
         }
 
 
@@ -413,7 +430,12 @@ class WebServerRunner:
             self.logdir = os.path.join(tmpdir, "log")
 
     def logfile(self, outfile: str) -> str:
-        return os.path.join(self.logdir, outfile)
+        path = os.path.join(self.logdir, outfile)
+        if 'uniqueid' in self.ctx:
+            uniqueid = self.ctx.uniqueid
+            path += "." + uniqueid
+
+        return path
 
     def run_serve(self) -> None:
         if self.pool:
@@ -524,6 +546,7 @@ class WebServerRunner:
                     f"--duration {wrk_duration}s "
                     f"--connections {cons} "
                     f"--threads {wrk_threads} "
+                    '--timeout {wrk_timeout} '
                     f'"{url}"'
                 ),
                 allow_error=True,
@@ -597,6 +620,7 @@ class WebServerRunner:
         url = f"http://{self.ctx.args.server_ip}:{self.ctx.args.port}/index.html"
         wrk_path = Wrk().get_binary_path(self.ctx)
         wrk_threads = self.ctx.args.threads
+        wrk_timeout = self.ctx.args.timeout
         wrk_duration = self.ctx.args.duration
 
         collect_stats = []
@@ -964,21 +988,25 @@ class WebServerRunner:
         """
 
     def test_server_script(self) -> str:
-        return self.server_script(f"""
+        return self.server_script(
+            f"""
         echo "=== copying index.html to log directory for client"
         cp "{self.rundir}/www/index.html" .
 
         echo "=== waiting for stop signal from client"
         test "$(comm_recv)" = stop
-        """)
+        """
+        )
 
     def test_client_script(self) -> str:
         return (
-            self.client_script(f"""
+            self.client_script(
+                f"""
         url="http://$server_host:{self.ctx.args.port}/index.html"
         echo "=== requesting $url"
         wget -q -O requested_index.html "$url"
-        """)
+        """
+            )
             + """
         if diff -q index.html requested_index.html; then
             echo "=== contents of index.html are correct"
@@ -994,7 +1022,8 @@ class WebServerRunner:
 
     def wrk_server_script(self) -> str:
         duration = self.ctx.args.duration
-        return self.server_script(f"""
+        return self.server_script(
+            f"""
         echo "=== waiting for first work rate"
         rate="$(comm_recv)"
         while [ "$rate" != stop ]; do
@@ -1008,12 +1037,14 @@ class WebServerRunner:
             echo "=== waiting for next work rate"
             rate="$(comm_recv)"
         done
-        """)
+        """
+        )
 
     def wrk_client_script(self) -> str:
         conns = " ".join(str(c) for c in self.ctx.args.connections)
         a = self.ctx.args
-        return self.client_script(f"""
+        return self.client_script(
+            f"""
         url="http://$server_host:{a.port}/index.html"
         echo "=== will benchmark $url for {a.duration} seconds for each work rate"
 
@@ -1038,16 +1069,19 @@ class WebServerRunner:
                 set +x
             done
         done
-        """)
+        """
+        )
 
     def standalone_server_script(self) -> str:
         duration = self.ctx.args.duration
-        return self.server_script(f"""
+        return self.server_script(
+            f"""
         echo "=== logging cpu usage to cpu for {duration} seconds"
         {{ timeout {duration} mpstat 1 {duration} || true; }} | \\
                 awk '/^[0-9].+all/ {{print 100-$13; fflush()}}' \\
                 > cpu
-        """)
+        """
+        )
 
 
 class Nginx(WebServer):

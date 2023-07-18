@@ -5,7 +5,7 @@ from typing import Iterable, Iterator, List, Optional
 
 from ...context import Context
 from ...package import Package
-from ...util import apply_patch, download, run
+from ...util import apply_patch, download, run, FatalError, require_program
 from ..cmake import CMake
 from ..gnu import AutoMake, Bash, BinUtils, CoreUtils, Make
 from ..ninja import Ninja
@@ -332,3 +332,57 @@ class LLVMBinDist(Package):
                 if os.path.exists(src) and not os.path.exists(tgt):
                     ctx.log.debug(f"creating symlink {tgt} -> {src}")
                     os.symlink(src, tgt)
+
+
+class LLVMSource(LLVM):
+    def __init__(self, source_type: str, source: str, version: str, build_flags: List[str] = []):
+        super().__init__(version, False, build_flags=build_flags)
+
+        if source_type not in ('directory', 'git'):
+            raise FatalError('invalid source type "%s"' % source_type)
+
+        self.source_type = source_type
+        self.source = source
+
+    def ident(self):
+        return 'llvm-src-' + self.version
+
+    def build(self, ctx):
+        os.makedirs('obj', exist_ok=True)
+        os.chdir('obj')
+        run(ctx, [
+            'cmake',
+            '-G', 'Ninja',
+            '-DCMAKE_INSTALL_PREFIX=' + self.path(ctx, 'install'),
+            '-DLLVM_BINUTILS_INCDIR=' + self.binutils.path(ctx, 'install/include'),
+            '-DCMAKE_BUILD_TYPE=Release',
+            '-DLLVM_ENABLE_ASSERTIONS=On',
+            '-DLLVM_OPTIMIZED_TABLEGEN=On',
+            *self.build_flags,
+            '../src/llvm'
+        ])
+        run(ctx, 'cmake --build . -- -j %d' % ctx.jobs)
+
+    def _parse_git_url(self, source):
+        url = source
+        parts = source.split(':')
+        rev = None
+        if len(parts) > 2:
+            rev = parts[2]
+            url = source.replace(':' + rev, '')
+        return [url, rev]
+
+    def fetch(self, ctx):
+        if self.source_type == 'directory':
+            os.symlink(self.source, "src")
+        elif self.source_type == 'git':
+            url, rev = self._parse_git_url(self.source)
+            require_program(ctx, 'git')
+            ctx.log.debug('cloning LLVM repo')
+            options = ['--depth', 1]
+            if rev is not None:
+                options += ['--branch', rev]
+            run(ctx, ['git', 'clone'] + options + [url, 'src'])
+
+    def is_installed(self, ctx):
+        return os.path.exists('install/bin/llvm-config')

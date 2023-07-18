@@ -148,6 +148,9 @@ class Context:
     #: An object with hooks for various points in the building/running process.
     hooks: ContextHooks = field(default_factory=ContextHooks)
 
+    #: Environment variables that are passed to benchmarks.
+    benchenv: Dict[str, Union[str, List[str]]] = field(default_factory=dict)
+
     #: Environment variables that are used when running a target.
     runenv: Dict[str, Union[str, List[str]]] = field(default_factory=dict)
 
