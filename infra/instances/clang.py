@@ -7,6 +7,31 @@ from ..packages import LLVM, Gperftools
 from ..util import FatalError
 
 
+class CustomCompiler(Instance):
+    def __init__(
+            self,
+            name,
+            cpath,
+            cxxpath,
+            optflag
+    ):
+        self._name = name
+        self.cpath = cpath
+        self.cxxpath = cxxpath
+        self.optflag = optflag
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def configure(self, ctx: Context) -> None:
+        ctx.cc = self.cpath
+        ctx.cxx = self.cxxpath
+
+        ctx.cflags += [self.optflag]
+        ctx.cxxflags += [self.optflag]
+
+
 class Clang(Instance):
     """
     Sets ``clang`` as the compiler. The version of clang used is determined by
@@ -27,12 +52,12 @@ class Clang(Instance):
     """
 
     def __init__(
-        self,
-        llvm: LLVM,
-        *,
-        optlevel: Union[int, str] = 2,
-        lto: bool = False,
-        alloc: str = "system"
+            self,
+            llvm: LLVM,
+            *,
+            optlevel: Union[int, str] = 2,
+            lto: bool = False,
+            alloc: str = "system"
     ):
         assert optlevel in (0, 1, 2, 3, "s"), "invalid optimization level"
         assert not (lto and optlevel == 0), "LTO needs compile-time opts"
@@ -82,18 +107,18 @@ class Clang(Instance):
 
 class ParameterizedClang(Clang):
     def __init__(
-        self,
-        llvm: LLVM,
-        name,
-        extra_cflags=None,
-        extra_cxxflags=None,
-        extra_ldflags=None,
-        extra_lib_ldflags=None,
-        benchmark_env=None,
-        *,
-        optlevel: Union[int, str] = 2,
-        lto=False,
-        alloc="system"
+            self,
+            llvm: LLVM,
+            name,
+            extra_cflags=None,
+            extra_cxxflags=None,
+            extra_ldflags=None,
+            extra_lib_ldflags=None,
+            benchmark_env=None,
+            *,
+            optlevel: Union[int, str] = 2,
+            lto=False,
+            alloc="system"
     ):
         super().__init__(llvm, optlevel=optlevel, lto=lto, alloc=alloc)
         self.extra_cflags = extra_cflags or []
