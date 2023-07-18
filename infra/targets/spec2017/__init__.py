@@ -290,7 +290,7 @@ class SPEC2017(Target):
 
         for bench in self._get_benchmarks(ctx, instance):
             expid = ""
-            if "uniqueid" in ctx:
+            if ctx.uniqueid is not None:
                 expid = "--expid=%s" % ctx.uniqueid
             cmd = (
                 f"killwrap_tree runcpu --config={config} --action=build {expid} {bench}"
@@ -346,7 +346,7 @@ class SPEC2017(Target):
         wrapper = "killwrap_tree"
         expid = ""
         uniqueid = ""
-        if "uniqueid" in ctx:
+        if ctx.uniqueid is not None:
             uniqueid = ctx.uniqueid
             expid = "--expid=%s" % ctx.uniqueid
 

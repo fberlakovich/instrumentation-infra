@@ -214,6 +214,9 @@ class Context:
     #: In practice it is either empty or ``['-flto']`` when compiling with LLVM.
     lib_ldflags: List[str] = field(default_factory=list)
 
+    # unique id identifying the current run
+    uniqueid: str = field(default=None)
+
     def copy(self) -> "Context":
         """
         Make a partial deepcopy of this Context, copying only fields of type
