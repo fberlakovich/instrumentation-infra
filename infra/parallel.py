@@ -1,3 +1,4 @@
+import atexit
 import fcntl
 import io
 import logging
@@ -28,6 +29,7 @@ from typing import (
 
 from .context import Context
 from .util import FatalError, Process, require_program, run
+
 
 # TODO: rewrite this to use
 # https://docs.python.org/3/library/concurrent.futures.html?
@@ -98,13 +100,13 @@ class Pool(metaclass=ABCMeta):
 
     @abstractmethod
     def make_jobs(
-        self,
-        ctx: Context,
-        cmd: Union[str, Iterable[str]],
-        jobid_base: str,
-        outfile_base: str,
-        nnodes: int,
-        **kwargs: Any,
+            self,
+            ctx: Context,
+            cmd: Union[str, Iterable[str]],
+            jobid_base: str,
+            outfile_base: str,
+            nnodes: int,
+            **kwargs: Any,
     ) -> Iterator[Job]:
         pass
 
@@ -136,6 +138,14 @@ class Pool(metaclass=ABCMeta):
             self.pollthread.daemon = True
             self.done = False
             self.pollthread.start()
+
+            # give the poller a chance to finish its work, e.g., parsing the logfiles of the last run
+            atexit.register(self._exit_poller)
+
+    def _exit_poller(self) -> None:
+        if self.pollthread is not None:
+            self.done = True
+            self.pollthread.join(self.poll_interval)
 
     def _poller_thread(self) -> None:
         # monitor the job queue for finished jobs, remove them from the queue
@@ -186,15 +196,15 @@ class Pool(metaclass=ABCMeta):
             time.sleep(self.poll_interval)
 
     def run(
-        self,
-        ctx: Context,
-        cmd: Union[str, Iterable[str]],
-        jobid: str,
-        outfile: str,
-        nnodes: int,
-        onsuccess: Optional[Callable[[Job], None]] = None,
-        onerror: Optional[Callable[[Job], None]] = None,
-        **kwargs: Any,
+            self,
+            ctx: Context,
+            cmd: Union[str, Iterable[str]],
+            jobid: str,
+            outfile: str,
+            nnodes: int,
+            onsuccess: Optional[Callable[[Job], None]] = None,
+            onerror: Optional[Callable[[Job], None]] = None,
+            **kwargs: Any,
     ) -> Iterable[Job]:
         """
         A non-blocking wrapper for :func:`util.run`, to be used when
@@ -254,13 +264,13 @@ class Pool(metaclass=ABCMeta):
 
 class ProcessPool(Pool):
     def make_jobs(
-        self,
-        ctx: Context,
-        cmd: Union[str, Iterable[str]],
-        jobid_base: str,
-        outfile_base: str,
-        nnodes: int,
-        **kwargs: Any,
+            self,
+            ctx: Context,
+            cmd: Union[str, Iterable[str]],
+            jobid_base: str,
+            outfile_base: str,
+            nnodes: int,
+            **kwargs: Any,
     ) -> Iterator[Job]:
         for i in range(nnodes):
             jobid = jobid_base
@@ -338,7 +348,7 @@ class SSHPool(Pool):
     _tempdir: Optional[str]
 
     def __init__(
-        self, ctx: Context, logger: logging.Logger, parallelmax: int, nodes: List[str]
+            self, ctx: Context, logger: logging.Logger, parallelmax: int, nodes: List[str]
     ):
         if parallelmax > len(nodes):
             raise FatalError(
@@ -359,10 +369,10 @@ class SSHPool(Pool):
         return self._tempdir
 
     def _ssh_cmd(
-        self,
-        node: str,
-        cmd: Union[str, Iterable[str]],
-        extra_opts: Optional[Sequence[Any]] = None,
+            self,
+            node: str,
+            cmd: Union[str, Iterable[str]],
+            extra_opts: Optional[Sequence[Any]] = None,
     ) -> List[str]:
         if not isinstance(cmd, str):
             cmd = " ".join(shlex.quote(str(c)) for c in cmd)
@@ -413,10 +423,10 @@ class SSHPool(Pool):
         self._tempdir = None
 
     def sync_to_nodes(
-        self,
-        sources: Union[str, Iterable[str]],
-        destination: str = "",
-        target_nodes: Optional[Union[str, Iterable[str]]] = None,
+            self,
+            sources: Union[str, Iterable[str]],
+            destination: str = "",
+            target_nodes: Optional[Union[str, Iterable[str]]] = None,
     ) -> None:
         if isinstance(sources, str):
             sources = [sources]
@@ -433,10 +443,10 @@ class SSHPool(Pool):
             run(self._ctx, cmd)
 
     def sync_from_nodes(
-        self,
-        source: str,
-        destination: str = "",
-        source_nodes: Optional[Sequence[str]] = None,
+            self,
+            source: str,
+            destination: str = "",
+            source_nodes: Optional[Sequence[str]] = None,
     ) -> None:
         if isinstance(source_nodes, str):
             source_nodes = [source_nodes]
@@ -467,15 +477,15 @@ class SSHPool(Pool):
             return self.available_nodes.pop()
 
     def make_jobs(
-        self,
-        ctx: Context,
-        cmd: Union[str, Iterable[str]],
-        jobid_base: str,
-        outfile_base: str,
-        nnodes: int,
-        nodes: Optional[Union[str, List[str]]] = None,
-        tunnel_to_nodes_dest: Optional[int] = None,
-        **kwargs: Any,
+            self,
+            ctx: Context,
+            cmd: Union[str, Iterable[str]],
+            jobid_base: str,
+            outfile_base: str,
+            nnodes: int,
+            nodes: Optional[Union[str, List[str]]] = None,
+            tunnel_to_nodes_dest: Optional[int] = None,
+            **kwargs: Any,
     ) -> Iterator[Job]:
         if isinstance(nodes, str):
             nodes = [nodes]
@@ -547,19 +557,19 @@ class PrunPool(Pool):
     default_job_time = 900  # if prun reserves this amount, it is not logged
 
     def __init__(
-        self, logger: logging.Logger, parallelmax: int, prun_opts: Iterable[str]
+            self, logger: logging.Logger, parallelmax: int, prun_opts: Iterable[str]
     ):
         super().__init__(logger, parallelmax)
         self.prun_opts = prun_opts
 
     def make_jobs(
-        self,
-        ctx: Context,
-        cmd: Union[str, Iterable[str]],
-        jobid_base: str,
-        outfile_base: str,
-        nnodes: int,
-        **kwargs: Any,
+            self,
+            ctx: Context,
+            cmd: Union[str, Iterable[str]],
+            jobid_base: str,
+            outfile_base: str,
+            nnodes: int,
+            **kwargs: Any,
     ) -> Iterator[Job]:
         require_program(ctx, "prun")
         self._wait_for_queue_space(nnodes)
@@ -593,7 +603,7 @@ class PrunPool(Pool):
         assert isinstance(job, PrunJob)
 
         def group_nodes(
-            nodes: Sequence[Tuple[int, int]]
+                nodes: Sequence[Tuple[int, int]]
         ) -> List[Tuple[List[int], List[int]]]:
             groups = [([m], [c]) for m, c in sorted(nodes)]
             for i in range(len(groups) - 1, 0, -1):
@@ -603,9 +613,9 @@ class PrunPool(Pool):
                     groups[i - 1] = lmachines, lcores + rcores
                     del groups[i]
                 elif (
-                    len(lcores) == 1
-                    and lmachines[-1] + 1 == rmachines[0]
-                    and lcores == rcores
+                        len(lcores) == 1
+                        and lmachines[-1] + 1 == rmachines[0]
+                        and lcores == rcores
                 ):
                     groups[i - 1] = lmachines + rmachines, lcores
                     del groups[i]
