@@ -13,12 +13,14 @@ class CustomCompiler(Instance):
             name,
             cpath,
             cxxpath,
-            optflag
+            optflags,
+            ldflags=[]
     ):
         self._name = name
         self.cpath = cpath
         self.cxxpath = cxxpath
-        self.optflag = optflag
+        self.optflags = optflags
+        self.ldflags = ldflags
 
     @property
     def name(self) -> str:
@@ -28,8 +30,10 @@ class CustomCompiler(Instance):
         ctx.cc = self.cpath
         ctx.cxx = self.cxxpath
 
-        ctx.cflags += [self.optflag]
-        ctx.cxxflags += [self.optflag]
+        ctx.cflags += self.optflags
+        ctx.cxxflags += self.optflags
+        ctx.ldflags += self.ldflags
+        ctx.lib_ldflags += self.ldflags
 
 
 class Clang(Instance):
@@ -52,12 +56,12 @@ class Clang(Instance):
     """
 
     def __init__(
-            self,
-            llvm: LLVM,
-            *,
-            optlevel: Union[int, str] = 2,
-            lto: bool = False,
-            alloc: str = "system"
+        self,
+        llvm: LLVM,
+        *,
+        optlevel: Union[int, str] = 2,
+        lto: bool = False,
+        alloc: str = "system"
     ):
         assert optlevel in (0, 1, 2, 3, "s"), "invalid optimization level"
         assert not (lto and optlevel == 0), "LTO needs compile-time opts"
