@@ -491,7 +491,7 @@ class SPEC2017(Target):
                 def callback_wrapper(job: Job) -> None:
                     if backup_callback is not None:
                         backup_callback(job)
-                        onsuccess_parse_log(job)
+                    onsuccess_parse_log(job)
 
                 self._run_bash(
                     ctx,
